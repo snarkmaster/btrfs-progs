@@ -106,7 +106,7 @@ static int add_directory_items(struct btrfs_trans_handle *trans,
 
 static int fill_inode_item(struct btrfs_trans_handle *trans,
 			   struct btrfs_root *root,
-			   struct btrfs_inode_item *dst, struct stat *src)
+			   struct btrfs_inode_item *dst, struct stat *src, u64 inode_flags)
 {
 	u64 blocks = 0;
 	u64 sectorsize = root->fs_info->sectorsize;
@@ -127,7 +127,7 @@ static int fill_inode_item(struct btrfs_trans_handle *trans,
 	btrfs_set_stack_inode_gid(dst, src->st_gid);
 	btrfs_set_stack_inode_mode(dst, src->st_mode);
 	btrfs_set_stack_inode_rdev(dst, 0);
-	btrfs_set_stack_inode_flags(dst, 0);
+	btrfs_set_stack_inode_flags(dst, inode_flags);
 	btrfs_set_stack_timespec_sec(&dst->atime, src->st_atime);
 	btrfs_set_stack_timespec_nsec(&dst->atime, 0);
 	btrfs_set_stack_timespec_sec(&dst->ctime, src->st_ctime);
@@ -200,6 +200,11 @@ static u64 calculate_dir_inode_size(const char *dirname)
 	return dir_inode_size;
 }
 
+bool is_clown_path(const char* path) {
+	const char* clown_path = ".btrfs-ublk-virtual-data";
+	return (strcmp(clown_path, path) == 0);
+}
+
 static int add_inode_items(struct btrfs_trans_handle *trans,
 			   struct btrfs_root *root,
 			   struct stat *st, const char *name,
@@ -210,8 +215,15 @@ static int add_inode_items(struct btrfs_trans_handle *trans,
 	struct btrfs_inode_item btrfs_inode;
 	u64 objectid;
 	u64 inode_size = 0;
-
-	fill_inode_item(trans, root, &btrfs_inode, st);
+	
+	fill_inode_item(
+		trans, root, &btrfs_inode, st,
+		// `populate_clown_file()` lays down a file that is
+		// virtualized by the block device, so there is no good way
+		// for this file to have pre-recorded checksums in the btrfs
+		// metadata.
+		(is_clown_path(name) ? BTRFS_INODE_NODATASUM : 0)
+	);
 	objectid = self_objectid;
 
 	if (S_ISDIR(st->st_mode)) {
@@ -300,6 +312,32 @@ fail:
 	return ret;
 }
 
+static int populate_clown_file(struct btrfs_trans_handle *trans,
+	       struct btrfs_root *root,
+	       struct btrfs_inode_item *btrfs_inode, 
+	       u64 objectid,
+	       struct stat *st) {
+	int ret = -1;
+	error("\n\nENTERING CLOWN MODE %ld\nENTERING CLOWN MODE\n\n", st->st_size);
+	struct btrfs_key key;
+	
+	u64 file_pos = 0;
+
+	ret = btrfs_reserve_extent(
+		trans, root, st->st_size, 0, 0, (u64)-1, &key, /*is_data*/1
+	);
+	if (ret) { goto end; }
+
+	ret = btrfs_record_file_extent(
+		trans, root, objectid, btrfs_inode, file_pos, key.objectid, st->st_size
+	);
+	if (ret) { goto end; }
+					
+end:	
+	return ret;
+}
+
+
 static int add_file_items(struct btrfs_trans_handle *trans,
 			  struct btrfs_root *root,
 			  struct btrfs_inode_item *btrfs_inode, u64 objectid,
@@ -320,6 +358,10 @@ static int add_file_items(struct btrfs_trans_handle *trans,
 
 	if (st->st_size == 0)
 		return 0;
+
+	if (is_clown_path(path_name)) {
+		return populate_clown_file(trans, root, btrfs_inode, objectid, st);
+	}
 
 	fd = open(path_name, O_RDONLY);
 	if (fd == -1) {

@@ -1200,7 +1200,7 @@ static void init_alloc_chunk_ctl_policy_regular(struct btrfs_fs_info *info,
 			ctl->max_stripes = BTRFS_MAX_DEVS_SYS_CHUNK;
 		} else if (type & BTRFS_BLOCK_GROUP_DATA) {
 			ctl->stripe_size = SZ_1G;
-			ctl->max_chunk_size = 10 * ctl->stripe_size;
+			ctl->max_chunk_size = (u64)10 * ctl->stripe_size;
 			ctl->min_stripe_size = SZ_64M;
 			ctl->max_stripes = BTRFS_MAX_DEVS(info);
 		} else if (type & BTRFS_BLOCK_GROUP_METADATA) {
@@ -1213,11 +1213,21 @@ static void init_alloc_chunk_ctl_policy_regular(struct btrfs_fs_info *info,
 			ctl->min_stripe_size = SZ_32M;
 			ctl->max_stripes = BTRFS_MAX_DEVS(info);
 		}
+	} else if (type & BTRFS_BLOCK_GROUP_DATA) {
+		error("XXX configuring non-RAID data chunk");
+		ctl->stripe_size = (u64)5368709120 * SZ_1G;  // 5 EiB
+		// XXX Is it a problem that this equals stripe size?
+		// In all other cases, stripe_size < max_chunk_size.
+		ctl->max_chunk_size = ctl->stripe_size;
+		ctl->min_stripe_size = (u64)5368709120 * SZ_1G; // 5 EiB
+		ctl->max_stripes = BTRFS_MAX_DEVS(info);
 	}
 
-	/* We don't want a chunk larger than 10% of the FS */
-	percent_max = div_factor(btrfs_super_total_bytes(info->super_copy), 1);
+	// XXX: Was: We don't want a chunk larger than 10% of the FS
+	// Now: just do 100% to allow > 4 EiB extents.
+	percent_max = div_factor(btrfs_super_total_bytes(info->super_copy), 10);
 	ctl->max_chunk_size = min(percent_max, ctl->max_chunk_size);
+	error("XXX max chunk %llu type %llu", ctl->max_chunk_size, type);
 }
 
 static void init_alloc_chunk_ctl_policy_zoned(struct btrfs_fs_info *info,
@@ -1385,6 +1395,7 @@ static int create_chunk(struct btrfs_trans_handle *trans,
 
 	stripes = &chunk->stripe;
 	ctl->num_bytes = chunk_bytes_by_type(ctl);
+	error("XXX num_bytes %llu", ctl->num_bytes);
 	index = 0;
 	while (index < ctl->num_stripes) {
 		u64 dev_offset;

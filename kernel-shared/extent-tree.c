@@ -263,7 +263,7 @@ static int block_group_bits(struct btrfs_block_group *cache, u64 bits)
 
 static int noinline find_search_start(struct btrfs_root *root,
 			      struct btrfs_block_group **cache_ret,
-			      u64 *start_ret, int num, u64 profile)
+			      u64 *start_ret, u64 num, u64 profile)
 {
 	int ret;
 	struct btrfs_block_group *cache = *cache_ret;
@@ -3547,7 +3547,9 @@ static int __btrfs_record_file_extent(struct btrfs_trans_handle *trans,
 						num_bytes, num_bytes);
 		return ret;
 	}
-	num_bytes = min_t(u64, num_bytes, BTRFS_MAX_EXTENT_SIZE);
+	// XXX Used to max out at BTRFS_MAX_EXTENT_SIZE, hacked up to 5 EiB,
+	// must not be lower than the source for `populate_clown_file()`.
+	num_bytes = min_t(u64, num_bytes, (u64)5368709120 * SZ_1G);  
 
 	path = btrfs_alloc_path();
 	if (!path)
